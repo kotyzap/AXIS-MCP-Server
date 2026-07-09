@@ -129,7 +129,9 @@
   figcaption { color: var(--muted); font-size: .85rem; text-align: center; margin-top: 8px; }
   .shot { background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 12px; }
   .shot img { border-radius: 9px; }
-  .gallery { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+  .gallery { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+  .gallery .span2 { grid-column: 1 / -1; }
+  .gallery .span2 img { max-width: 760px; margin: 0 auto; }
   @media (max-width: 820px) { .gallery { grid-template-columns: 1fr; } }
 
   footer { border-top: 1px solid var(--border); padding: 34px 0; color: var(--muted); font-size: .9rem; }
@@ -149,6 +151,7 @@
     <a href="#console">Console</a>
     <a href="#architecture">Architecture</a>
     <a href="#quickstart">Quick start</a>
+    <a href="https://github.com/kotyzap/AXIS-MCP-Server" target="_blank" rel="noopener">GitHub</a>
     <button class="theme-btn" onclick="toggleTheme()" id="themeBtn">Dark</button>
   </div>
 </div></nav>
@@ -162,7 +165,8 @@
   <p class="lede">The first on-camera Model Context Protocol server for AXIS cameras. One <span class="mono">.eap</span> opens the camera to Claude, Gemini, ChatGPT and Perplexity — no cloud, no middleware. Zero hops. Zero cloud.</p>
   <div class="cta">
     <a class="btn primary" href="#quickstart">Get started →</a>
-    <a class="btn" href="https://github.com/" target="_blank" rel="noopener">★ View on GitHub</a>
+    <a class="btn" href="https://github.com/kotyzap/AXIS-MCP-Server" target="_blank" rel="noopener">★ View on GitHub</a>
+    <a class="btn" href="https://github.com/kotyzap/AXIS-MCP-Server/releases" target="_blank" rel="noopener">⬇ Download .eap</a>
     <a href='https://ko-fi.com/K3K6RR4LY' target='_blank'><img height='36' style='border:0px;height:36px;' src='https://storage.ko-fi.com/cdn/kofi6.png?v=6' border='0' alt='Buy Me a Coffee at ko-fi.com' /></a>
   </div>
   <figure class="hero-img">
@@ -177,19 +181,23 @@
     <div class="card"><h3><span class="ic mono">◉</span>On-camera native</h3><p>A Node.js runtime bundled into a native AXIS OS 11/12 ACAP. No gateway, no relay — the MCP server runs on the device.</p></div>
     <div class="card"><h3><span class="ic mono">⇄</span>Streamable HTTP</h3><p>Standards-compliant MCP over stateless Streamable HTTP — exactly what modern agents expect.</p></div>
     <div class="card"><h3><span class="ic mono">∗</span>Model-agnostic</h3><p>Claude, Gemini / Antigravity, ChatGPT Developer Mode, Perplexity, and any custom agent. Open protocol, open future.</p></div>
-    <div class="card"><h3><span class="ic mono">⌘</span>Rich VAPIX toolset</h3><p>Device health, snapshots, imaging, optics, autofocus, events, analytics and app control — as clean structured tools.</p></div>
+    <div class="card"><h3><span class="ic mono">⌘</span>54 VAPIX tools</h3><p>Device health, snapshots, imaging, optics, autofocus, PTZ, I/O, recordings, streaming URLs, events, analytics, app control and guarded maintenance — as clean structured tools.</p></div>
     <div class="card"><h3><span class="ic mono">▶</span>CamStreamer suite</h3><p>Drive CamStreamer, CamSwitcher and CamOverlay. “Switch to the gate view and go live” — and it happens.</p></div>
     <div class="card"><h3><span class="ic mono">🔒</span>Enterprise-safe</h3><p>Behind the camera's admin auth, with an optional bearer-guarded direct port. Parameter writes are allow-listed.</p></div>
   </div>
 </div></section>
 
 <section id="tools" style="background:var(--bg2)"><div class="wrap">
-  <div class="center"><h2>What the AI can do</h2><p class="sub">A curated toolset that returns data an LLM can reason over — not raw CGI dumps.</p></div>
+  <div class="center"><h2>What the AI can do</h2><p class="sub">54 tools across 12 modules that return data an LLM can reason over — not raw CGI dumps.</p></div>
   <div class="grid g2">
-    <div class="card"><h3>Device &amp; health</h3><p class="mono" style="font-size:.85rem;color:var(--muted)">get_device_info · get_system_status · get_time</p></div>
+    <div class="card"><h3>Device &amp; health</h3><p class="mono" style="font-size:.85rem;color:var(--muted)">get_device_info · get_device_properties · get_system_status · get_time</p></div>
     <div class="card"><h3>Imaging &amp; optics</h3><p class="mono" style="font-size:.85rem;color:var(--muted)">take_snapshot · get/set_image_settings · set_zoom_focus · get_optics · autofocus</p></div>
+    <div class="card"><h3>PTZ</h3><p class="mono" style="font-size:.85rem;color:var(--muted)">ptz_move · relative/absolute/continuous · ptz_query · presets (goto/save/remove)</p></div>
     <div class="card"><h3>Events &amp; analytics</h3><p class="mono" style="font-size:.85rem;color:var(--muted)">list_event_declarations · get_analytics_status</p></div>
     <div class="card"><h3>Application control</h3><p class="mono" style="font-size:.85rem;color:var(--muted)">list_apps · control_app · get_params · set_param</p></div>
+    <div class="card"><h3>System &amp; maintenance</h3><p class="mono" style="font-size:.85rem;color:var(--muted)">get_api_list · get_capabilities · get_firmware_properties · reboot_camera · factory_default</p></div>
+    <div class="card"><h3>I/O &amp; recordings</h3><p class="mono" style="font-size:.85rem;color:var(--muted)">io_set_output · io_get_inputs · storage_list/start/stop_recording</p></div>
+    <div class="card"><h3>Streaming &amp; audio</h3><p class="mono" style="font-size:.85rem;color:var(--muted)">get_rtsp_url · get_mjpeg_url · get_audio_config · get_audio_urls</p></div>
     <div class="card"><h3>CamStreamer</h3><p class="mono" style="font-size:.85rem;color:var(--muted)">camstreamer_list_streams · stream_status · control_stream</p></div>
     <div class="card"><h3>CamSwitcher &amp; CamOverlay</h3><p class="mono" style="font-size:.85rem;color:var(--muted)">camswitcher_list/switch/queue · camoverlay_services · update_graphic_text</p></div>
   </div>
@@ -237,7 +245,7 @@
       <img src="img/claude-code-ptz-presets-view-areas.png" alt="Claude Code enumerates PTZ presets per view area on the AXIS camera" onerror="this.closest('figure').style.display='none'">
       <figcaption>Claude Code: PTZ presets per view area.</figcaption>
     </figure>
-    <figure class="shot">
+    <figure class="shot span2">
       <img src="img/antigravity-gemini-list-axis-acaps.png" alt="Google Antigravity running Gemini lists installed ACAPs on an AXIS camera through the on-camera MCP server" onerror="this.closest('figure').style.display='none'">
       <figcaption>Antigravity (Gemini): enumerating ACAPs.</figcaption>
     </figure>
@@ -256,23 +264,22 @@
 
 <section id="quickstart" style="background:var(--bg2)"><div class="wrap">
   <div class="center"><h2>Up and running in minutes</h2><p class="sub">Build with Docker on your machine, install the .eap, point your agent at the camera.</p></div>
-  <div class="grid g2" style="align-items:start">
-    <div class="steps">
-      <div class="step"><span class="n"></span><div><h4>Build the package</h4><p>ARTPEC-8 / <span class="mono">aarch64</span>. Docker is used only to build.</p>
+  <div class="steps" style="max-width:640px;margin:0 auto">
+      <div class="step"><span class="n"></span><div><h4>Get the package</h4><p>Download a prebuilt <span class="mono">.eap</span> from <a href="https://github.com/kotyzap/AXIS-MCP-Server/releases" target="_blank" rel="noopener">Releases</a>, or build it yourself (ARTPEC-8 / <span class="mono">aarch64</span>; Docker is used only to build).</p>
         <pre class="code mono">cd axis-mcp-acap
 sh build.sh arm64   <span class="c"># → Axis_MCP_Server_1_2_0_aarch64.eap</span></pre></div></div>
-      <div class="step"><span class="n"></span><div><h4>Install on the camera</h4><p>System → Apps → enable <em>Allow unsigned apps</em> → upload the <span class="mono">.eap</span> → Start. Then enter VAPIX admin credentials on the settings page.</p></div></div>
+      <div class="step"><span class="n"></span><div><h4>Install on the camera</h4><p>System → Apps → enable <em>Allow unsigned apps</em> → upload the <span class="mono">.eap</span> → Start. Then enter VAPIX admin credentials on the settings page.</p>
+        <figure class="shot" style="margin-top:14px">
+          <img src="img/axis-mcp-server-installed-on-camera.png" alt="The AXIS MCP Server ACAP installed and running on an AXIS Q1656 Box Camera" onerror="this.closest('figure').style.display='none'">
+          <figcaption>Installed as a native ACAP on the AXIS Q1656.</figcaption>
+        </figure>
+      </div></div>
       <div class="step"><span class="n"></span><div><h4>Connect any MCP client</h4><p>Use the direct LAN port — and tag the client so the console shows its logo.</p>
         <pre class="code mono">claude mcp add --transport http axis-q1656 \
   http://&lt;camera-ip&gt;:8000/mcp
 
 <span class="c"># tag a client for its own logo</span>
 http://&lt;camera-ip&gt;:8000/mcp?client=antigravity</pre></div></div>
-    </div>
-    <figure class="shot">
-      <img src="img/axis-mcp-server-installed-on-camera.png" alt="The AXIS MCP Server ACAP installed and running on an AXIS Q1656 Box Camera" onerror="this.closest('figure').style.display='none'">
-      <figcaption>Installed as a native ACAP on the AXIS Q1656.</figcaption>
-    </figure>
   </div>
 </div></section>
 
@@ -295,7 +302,7 @@ http://&lt;camera-ip&gt;:8000/mcp?client=antigravity</pre></div></div>
 
 <footer><div class="wrap">
   <span class="brand" style="font-size:.95rem"><svg width="18" height="18" viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="50" r="34" fill="none" stroke="#FFCC33" stroke-width="12"/><circle cx="50" cy="50" r="12" fill="#FFCC33"/></svg> AXIS MCP Server</span>
-  <span class="mono">Built with the ACAP Native SDK · MIT · not affiliated with Axis Communications</span>
+  <span class="mono"><a href="https://github.com/kotyzap/AXIS-MCP-Server" target="_blank" rel="noopener">GitHub</a> · <a href="https://github.com/kotyzap/AXIS-MCP-Server/releases" target="_blank" rel="noopener">Releases</a> · Built with the ACAP Native SDK · MIT · not affiliated with Axis Communications</span>
   <a href='https://ko-fi.com/K3K6RR4LY' target='_blank'><img height='36' style='border:0px;height:36px;' src='https://storage.ko-fi.com/cdn/kofi6.png?v=6' border='0' alt='Buy Me a Coffee at ko-fi.com' /></a>
 </div></footer>
 
