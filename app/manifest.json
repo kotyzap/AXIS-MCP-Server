@@ -1,0 +1,22 @@
+{
+  "schemaVersion": "1.7.4",
+  "acapPackageConf": {
+    "setup": {
+      "appName": "axis_mcp",
+      "friendlyName": "Axis MCP Server",
+      "vendor": "Pavel Kotyza",
+      "version": "1.2.0",
+      "architecture": "aarch64",
+      "runMode": "respawn"
+    },
+    "configuration": {
+      "settingPage": "index.html",
+      "reverseProxy": [
+        { "apiPath": "mcp",          "target": "http://localhost:32554/mcp",          "access": "admin" },
+        { "apiPath": "status.cgi",   "target": "http://localhost:32554/status.cgi",   "access": "admin" },
+        { "apiPath": "settings.cgi", "target": "http://localhost:32554/settings.cgi", "access": "admin" },
+        { "apiPath": "log.cgi",      "target": "http://localhost:32554/log.cgi",      "access": "admin" }
+      ]
+    }
+  }
+}

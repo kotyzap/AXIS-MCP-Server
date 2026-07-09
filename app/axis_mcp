@@ -1,0 +1,35 @@
+#!/bin/sh
+# ACAP entry point. FILENAME must equal `appName` in manifest.json (axis_mcp).
+# AXIS OS launches the file named after appName. runMode=respawn restarts it
+# after a settings save / crash. Picks the bundled Node for this architecture
+# and runs the compiled app.
+
+APP_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$APP_DIR" || exit 1
+
+# Writable persistence dir (settings, keys). AXIS OS gives the app a writable cwd.
+PERSISTENT_DATA_PATH="${PERSISTENT_DATA_PATH:-$APP_DIR/localdata/}"
+export PERSISTENT_DATA_PATH
+mkdir -p "$PERSISTENT_DATA_PATH"
+
+# Runtime dir for any decompressed binaries: prefer SD card, else internal.
+SD_DISK=/var/spool/storage/SD_DISK
+if [ -d "$SD_DISK" ] && touch "$SD_DISK/.wtest" 2>/dev/null; then
+    rm -f "$SD_DISK/.wtest"; RUNTIME_DIR="$SD_DISK/axis_mcp_runtime"
+else
+    RUNTIME_DIR="$APP_DIR/localdata/runtime"
+fi
+mkdir -p "$RUNTIME_DIR"
+
+case "$(uname -m)" in
+  aarch64|arm64) A=arm64 ;;
+  *)             A=armhf ;;
+esac
+
+NODE="$APP_DIR/bin/node-$A"
+if [ ! -x "$NODE" ] && [ -f "$APP_DIR/bin/node-$A.gz" ]; then
+    [ -x "$RUNTIME_DIR/node-$A" ] || { gunzip -c "$APP_DIR/bin/node-$A.gz" > "$RUNTIME_DIR/node-$A" && chmod 0755 "$RUNTIME_DIR/node-$A"; }
+    NODE="$RUNTIME_DIR/node-$A"
+fi
+
+exec "$NODE" "$APP_DIR/dist/bootstrap.js"

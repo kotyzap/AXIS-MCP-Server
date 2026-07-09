@@ -1,0 +1,510 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Axis MCP Server</title>
+  <style>
+    :root {
+      --bg: #f5f6f8;
+      --panel: #ffffff;
+      --text: #1a1d21;
+      --muted: #5c6470;
+      --border: #d9dde3;
+      --accent: #0b6bcb;
+      --accent-text: #ffffff;
+      --ok: #1a7f37;
+      --err: #c81e1e;
+      --code-bg: #f0f2f5;
+    }
+    [data-theme="dark"] {
+      --bg: #14171c;
+      --panel: #1e232b;
+      --text: #e6e9ee;
+      --muted: #9aa4b2;
+      --border: #2c333d;
+      --accent: #4c9aff;
+      --accent-text: #0b0d10;
+      --ok: #4ade80;
+      --err: #f87171;
+      --code-bg: #12151a;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; padding: 24px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg); color: var(--text); line-height: 1.5;
+    }
+    .wrap { max-width: 1180px; margin: 0 auto; }
+    header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }
+    h1 { font-size: 1.4rem; margin: 0; }
+    h2 { font-size: 1rem; margin: 0 0 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; align-items: stretch; }
+    .col { display: flex; flex-direction: column; gap: 18px; }
+    /* Make each column's last card grow so both columns end on the same line. */
+    .col > .card:last-child { flex: 1 1 auto; }
+    @media (max-width: 860px) { .grid { grid-template-columns: 1fr; } .col > .card:last-child { flex: 0 0 auto; } }
+    .card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 20px; }
+    label { display: block; font-size: .88rem; margin: 12px 0 4px; color: var(--muted); }
+    input[type=text], input[type=password], input[type=number] {
+      width: 100%; padding: 9px 11px; border: 1px solid var(--border); border-radius: 7px;
+      background: var(--bg); color: var(--text); font-size: .95rem;
+    }
+    .row { display: flex; gap: 14px; }
+    .row > div { flex: 1; }
+    .check { display: flex; align-items: center; gap: 8px; margin-top: 14px; }
+    .check input { width: auto; }
+    button {
+      background: var(--accent); color: var(--accent-text); border: none; border-radius: 7px;
+      padding: 10px 18px; font-size: .95rem; font-weight: 600; cursor: pointer; margin-top: 16px;
+    }
+    button.secondary { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
+    button:disabled { opacity: .5; cursor: default; }
+    .theme-btn { background: transparent; border: 1px solid var(--border); color: var(--text); padding: 6px 12px; margin: 0; border-radius: 999px; font-weight: 500; }
+    .status-line { display: flex; align-items: center; gap: 8px; margin: 6px 0; font-size: .95rem; }
+    .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); flex: none; }
+    .dot.ok { background: var(--ok); } .dot.err { background: var(--err); }
+    code, pre { background: var(--code-bg); border-radius: 6px; font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+    code { padding: 2px 6px; font-size: .85rem; }
+    pre { padding: 12px; overflow: auto; font-size: .8rem; max-height: 280px; }
+    .url { display: flex; align-items: center; gap: 8px; margin: 8px 0; flex-wrap: wrap; }
+    .muted { color: var(--muted); font-size: .85rem; }
+    .toast { margin-top: 12px; font-size: .9rem; }
+    .toast.ok { color: var(--ok); } .toast.err { color: var(--err); }
+
+    /* ---- Live Log + ASCII panel ---- */
+    .log-card { margin-top: 18px; }
+    .log-head { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 12px; }
+    .log-head h2 { margin: 0; }
+    .log-controls { margin-left: auto; display: flex; align-items: center; gap: 14px; font-size: .85rem; color: var(--muted); }
+    .log-controls label { margin: 0; display: flex; align-items: center; gap: 6px; }
+    .log-controls button { margin: 0; padding: 5px 12px; font-size: .82rem; }
+    .badge { display: inline-flex; align-items: center; gap: 8px; padding: 5px 12px; border-radius: 999px;
+      border: 1px solid var(--border); font-size: .82rem; font-weight: 600; }
+    .badge .dot { width: 9px; height: 9px; }
+    .badge.on { color: var(--ok); border-color: var(--ok); }
+    .badge.on .dot { background: var(--ok); animation: pulse 1.2s ease-in-out infinite; }
+    .badge.off { color: var(--muted); }
+    @keyframes pulse { 0%,100% { opacity: 1; box-shadow: 0 0 0 0 rgba(74,222,128,.5); } 50% { opacity: .5; box-shadow: 0 0 0 5px rgba(74,222,128,0); } }
+
+    .log-body { display: flex; gap: 16px; align-items: stretch; }
+    .ascii { flex: 0 0 300px; background: var(--code-bg); border-radius: 8px; padding: 14px 10px;
+      font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .78rem; line-height: 1.25;
+      white-space: pre; color: var(--muted); overflow: hidden; display: flex; align-items: center; justify-content: center; }
+    .ascii.on { color: var(--accent); }
+    #logView { flex: 1 1 auto; background: var(--code-bg); border-radius: 8px; padding: 12px 14px; margin: 0;
+      height: 150px; overflow-y: auto; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .8rem; }
+    .logline { white-space: pre-wrap; word-break: break-all; padding: 1px 0; color: var(--text); }
+    .logline .t { color: var(--muted); }
+    .logline.mcp { color: var(--accent); }
+    .logline.err { color: var(--err); }
+    @media (max-width: 860px) { .log-body { flex-direction: column; } .ascii { flex: 0 0 auto; } }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>Axis MCP Server <span id="appVer" style="font-size:.8rem; font-weight:400; color:var(--muted);"></span></h1>
+      <button id="themeBtn" class="theme-btn" onclick="toggleTheme()">🌙 Dark</button>
+    </header>
+
+    <div class="grid">
+      <div class="col">
+        <div class="card">
+          <h2>Status</h2>
+          <div class="status-line"><span id="dotApp" class="dot"></span><span id="appStatus">Checking…</span></div>
+          <div class="status-line"><span id="dotVapix" class="dot"></span><span id="vapixStatus">VAPIX: unknown</span></div>
+          <div id="deviceInfo" class="muted"></div>
+          <button class="secondary" onclick="selfTest()">Run self-test</button>
+        </div>
+
+        <div class="card">
+          <h2>MCP endpoints</h2>
+          <div class="url"><code id="urlProxy"></code></div>
+          <p class="muted">Reverse-proxied path — enforces camera admin (digest) auth.</p>
+          <div class="url"><code id="urlDirect"></code></div>
+          <p class="muted">Direct LAN port — for MCP clients that can't do digest. Optional bearer token.</p>
+          <p class="muted">Add to Claude Code: <code id="claudeCmd"></code></p>
+          <p class="muted">Tag a client for its own logo: append <code>?client=antigravity</code> (or gemini, claude, openai) to the /mcp URL.</p>
+        </div>
+      </div>
+
+      <div class="col">
+        <div class="card">
+          <h2>VAPIX credentials</h2>
+          <p class="muted">Admin account the server uses for on-camera API calls.</p>
+          <div class="row">
+            <div>
+              <label for="vapixUser">Username</label>
+              <input type="text" id="vapixUser" autocomplete="username" />
+            </div>
+            <div>
+              <label for="vapixPass">Password</label>
+              <input type="password" id="vapixPass" autocomplete="current-password" placeholder="(unchanged)" />
+            </div>
+          </div>
+          <label for="vapixHost">VAPIX host</label>
+          <input type="text" id="vapixHost" value="127.0.0.1" />
+
+          <h2 style="margin-top:22px">Direct MCP port</h2>
+          <div class="check">
+            <input type="checkbox" id="directPortEnabled" />
+            <label for="directPortEnabled" style="margin:0">Enable direct MCP listener</label>
+          </div>
+          <div class="row">
+            <div>
+              <label for="directPort">Port</label>
+              <input type="number" id="directPort" value="8000" />
+            </div>
+            <div>
+              <label for="bearerToken">Bearer token (optional)</label>
+              <input type="password" id="bearerToken" placeholder="(unchanged)" />
+            </div>
+          </div>
+
+          <button onclick="save()">Save settings</button>
+          <div id="toast" class="toast"></div>
+          <p class="muted" style="margin-top:8px">Saving restarts the app (runMode: respawn); the MCP server reconnects automatically.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="card log-card">
+      <div class="log-head">
+        <h2>Live Log</h2>
+        <span id="llmBadge" class="badge off"><span class="dot"></span><span id="llmText">Waiting for LLM…</span></span>
+        <div class="log-controls">
+          <label>Logo
+            <select id="logoSel" onchange="setLogoOverride(this.value)" style="padding:3px 6px; border:1px solid var(--border); border-radius:6px; background:var(--bg); color:var(--text);">
+              <option value="">Auto</option>
+              <option value="claude">Claude</option>
+              <option value="gemini">Gemini</option>
+              <option value="antigravity">Antigravity</option>
+              <option value="openai">OpenAI</option>
+              <option value="generic">Robot</option>
+            </select>
+          </label>
+          <label><input type="checkbox" id="logAuto" checked /> Auto-scroll</label>
+          <label><input type="checkbox" id="logPause" /> Pause</label>
+          <button class="secondary" onclick="clearLog()">Clear</button>
+        </div>
+      </div>
+      <div class="log-body">
+        <div id="ascii" class="ascii"></div>
+        <pre id="logView"></pre>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // API base detection (skill: web-ui-and-vapix.md portable snippet).
+    const PKG = 'axis_mcp';
+    const isDirectPort = location.port === '32554' || location.port === '8000';
+    let API_PREFIX;
+    if (isDirectPort) {
+      API_PREFIX = '';
+    } else {
+      API_PREFIX = '/local/' + PKG;
+    }
+
+    function toggleTheme() {
+      const cur = document.documentElement.getAttribute('data-theme');
+      const next = cur === 'dark' ? 'light' : 'dark';
+      applyTheme(next);
+      // Persist to settings (best effort).
+      postSettings({ theme: next });
+    }
+    function applyTheme(t) {
+      document.documentElement.setAttribute('data-theme', t);
+      document.getElementById('themeBtn').textContent = t === 'dark' ? '☀️ Light' : '🌙 Dark';
+    }
+
+    function fillUrls() {
+      const host = location.hostname || '<camera-ip>';
+      const dp = document.getElementById('directPort').value || '8000';
+      document.getElementById('urlProxy').textContent = location.origin + '/local/' + PKG + '/mcp';
+      document.getElementById('urlDirect').textContent = 'http://' + host + ':' + dp + '/mcp';
+      document.getElementById('claudeCmd').textContent =
+        'claude mcp add --transport http axis-q1656 http://' + host + ':' + dp + '/mcp';
+    }
+
+    async function loadStatus() {
+      const dotApp = document.getElementById('dotApp');
+      const appStatus = document.getElementById('appStatus');
+      try {
+        const r = await fetch(API_PREFIX + '/status.cgi', { cache: 'no-store' });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const s = await r.json();
+        dotApp.className = 'dot ok';
+        appStatus.textContent = 'App running · v' + s.version + (s.configured ? ' · configured' : ' · not configured');
+        document.getElementById('appVer').textContent = 'v' + s.version;
+        renderVapix(s.vapix);
+      } catch (e) {
+        dotApp.className = 'dot err';
+        appStatus.textContent = 'App starting… (' + e.message + ')';
+        setTimeout(loadStatus, 3000);
+      }
+    }
+
+    function renderVapix(v) {
+      const dot = document.getElementById('dotVapix');
+      const st = document.getElementById('vapixStatus');
+      const info = document.getElementById('deviceInfo');
+      if (!v) { dot.className = 'dot'; st.textContent = 'VAPIX: not configured'; info.textContent = ''; return; }
+      if (v.ok) {
+        dot.className = 'dot ok';
+        st.textContent = 'VAPIX: connected';
+        if (v.device) {
+          const d = v.device;
+          info.textContent = [d.ProdNbr, d.SerialNumber, d.Version].filter(Boolean).join(' · ');
+        }
+      } else {
+        dot.className = 'dot err';
+        st.textContent = 'VAPIX: error (' + (v.httpStatus || v.error || '?') + ')';
+      }
+    }
+
+    async function loadSettings() {
+      try {
+        const r = await fetch(API_PREFIX + '/settings.cgi', { cache: 'no-store' });
+        if (!r.ok) return;
+        const s = await r.json();
+        document.getElementById('vapixUser').value = s.vapixUser || '';
+        document.getElementById('vapixHost').value = s.vapixHost || '127.0.0.1';
+        document.getElementById('directPortEnabled').checked = !!s.directPortEnabled;
+        document.getElementById('directPort').value = s.directPort || 8000;
+        document.getElementById('vapixPass').placeholder = s.hasPassword ? '(unchanged)' : '';
+        document.getElementById('bearerToken').placeholder = s.hasBearerToken ? '(unchanged)' : '';
+        applyTheme(s.theme === 'dark' ? 'dark' : 'light');
+        logoOverride = s.logoOverride || '';
+        const sel = document.getElementById('logoSel');
+        if (sel) sel.value = logoOverride;
+        vendor = computeVendor();
+        fillUrls();
+      } catch (e) { /* ignore */ }
+    }
+
+    async function postSettings(patch) {
+      const r = await fetch(API_PREFIX + '/settings.cgi', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch),
+      });
+      let detail = '';
+      try {
+        const j = await r.json();
+        if (j && j.error) detail = j.error;
+      } catch (e) { detail = 'HTTP ' + r.status; }
+      return { ok: r.ok, status: r.status, detail };
+    }
+
+    async function save() {
+      const patch = {
+        vapixUser: document.getElementById('vapixUser').value,
+        vapixHost: document.getElementById('vapixHost').value,
+        directPortEnabled: document.getElementById('directPortEnabled').checked,
+        directPort: parseInt(document.getElementById('directPort').value, 10) || 8000,
+      };
+      const pass = document.getElementById('vapixPass').value;
+      if (pass) patch.vapixPass = pass;
+      const bt = document.getElementById('bearerToken').value;
+      if (bt) patch.bearerToken = bt;
+
+      const toast = document.getElementById('toast');
+      try {
+        const res = await postSettings(patch);
+        toast.className = 'toast ' + (res.ok ? 'ok' : 'err');
+        toast.textContent = res.ok
+          ? 'Saved. App is restarting…'
+          : 'Save failed (HTTP ' + res.status + ')' + (res.detail ? ': ' + res.detail : '');
+        if (res.ok) {
+          document.getElementById('vapixPass').value = '';
+          document.getElementById('bearerToken').value = '';
+          fillUrls();
+          setTimeout(loadStatus, 4000);
+        }
+      } catch (e) {
+        toast.className = 'toast err';
+        toast.textContent = 'Save failed: ' + e.message;
+      }
+    }
+
+    async function selfTest() {
+      document.getElementById('vapixStatus').textContent = 'VAPIX: testing…';
+      await loadStatus();
+    }
+
+    // ---- Live Log + LLM connection animation ----
+    let logSeq = 0;
+    let llmConnected = false;
+
+    function clearLog() {
+      document.getElementById('logView').innerHTML = '';
+    }
+
+    function appendLog(entries) {
+      const v = document.getElementById('logView');
+      const auto = document.getElementById('logAuto').checked;
+      for (const e of entries) {
+        const div = document.createElement('div');
+        let cls = 'logline';
+        if (e.level === 'error') cls += ' err';
+        else if (/^MCP\b/.test(e.msg)) cls += ' mcp';
+        div.className = cls;
+        const t = new Date(e.ts).toLocaleTimeString();
+        div.innerHTML = '<span class="t">' + t + '</span>  ' + escapeHtml(e.msg);
+        v.appendChild(div);
+      }
+      while (v.childElementCount > 500) v.removeChild(v.firstChild);
+      if (auto) v.scrollTop = v.scrollHeight;
+    }
+
+    function escapeHtml(s) {
+      return s.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+    }
+
+    let clientName = '';
+    let clientUA = '';
+    let clientTag = '';
+    let vendor = 'idle';
+    let logoOverride = '';
+
+    function computeVendor() {
+      if (logoOverride) return logoOverride;                 // manual dropdown wins
+      if (clientTag && LOGOS[clientTag]) return clientTag;    // explicit ?client= tag (100%)
+      return (clientName || clientUA) ? classifyClient(clientName, clientUA) : 'idle';
+    }
+
+    function setLogoOverride(v) {
+      logoOverride = v;
+      vendor = computeVendor();
+      updateLlmBadge();
+      postSettings({ logoOverride: v });
+    }
+
+    async function pollLog() {
+      if (!document.getElementById('logPause').checked) {
+        try {
+          const r = await fetch(API_PREFIX + '/log.cgi?since=' + logSeq, { cache: 'no-store' });
+          if (r.ok) {
+            const j = await r.json();
+            logSeq = j.lastSeq;
+            if (j.entries && j.entries.length) appendLog(j.entries);
+            llmConnected = j.mcpMsAgo !== null && j.mcpMsAgo < 20000;
+            clientName = j.client || '';
+            clientUA = j.clientUA || '';
+            clientTag = j.clientTag || '';
+            // Keep showing the model's logo once known; only the active/idle
+            // state (badge colour + link animation) follows recent activity.
+            vendor = computeVendor();
+            updateLlmBadge();
+          }
+        } catch (e) { /* ignore */ }
+      }
+      setTimeout(pollLog, 1500);
+    }
+
+    function classifyClient(name, ua) {
+      const s = ((name || '') + ' ' + (ua || '')).toLowerCase();
+      // Antigravity / Gemini checked first: Antigravity may report a model name
+      // like "claude-code" while its User-Agent identifies the IDE.
+      if (/antigravity/.test(s)) return 'antigravity';
+      if (/gemini|google/.test(s)) return 'gemini';
+      if (/claude|anthropic/.test(s)) return 'claude';
+      if (/openai|chatgpt|\bgpt\b|codex/.test(s)) return 'openai';
+      return 'generic';
+    }
+
+    function updateLlmBadge() {
+      const badge = document.getElementById('llmBadge');
+      const text = document.getElementById('llmText');
+      badge.className = 'badge ' + (llmConnected ? 'on' : 'off');
+      const label = LOGOS[vendor] ? LOGOS[vendor].label : 'LLM';
+      if (llmConnected) {
+        text.textContent = label + ' connected' + (clientName ? ' (' + clientName + ')' : '');
+      } else if (logoOverride) {
+        text.textContent = label + ' (forced)';
+      } else if (clientName) {
+        text.textContent = label + ' idle (' + clientName + ')';
+      } else {
+        text.textContent = 'Waiting for LLM…';
+      }
+      // Tooltip shows exactly what auto-detect saw, to help tune classification.
+      badge.title = 'detected name: ' + (clientName || '—') + '\nUser-Agent: ' + (clientUA || '—');
+      document.getElementById('ascii').className = 'ascii' + (llmConnected ? ' on' : '');
+    }
+
+    // Per-client ASCII logos. Each frame is 3 short lines (centered at render):
+    // Claude = Anthropic spark/burst, Gemini = four-point star, OpenAI = knot,
+    // generic = robot, idle = sleeping robot.
+    const LOGOS = {
+      claude: { label: 'Claude', frames: [
+        ['\\ | /', '--*--', '/ | \\'],
+        ['. | .', '-(*)-', "' | '"],
+        ['\\ . /', '=<*>=', '/ . \\'],
+      ] },
+      gemini: { label: 'Gemini', frames: [
+        ['/\\', '<>', '\\/'],
+        ['/\\', '<+>', '\\/'],
+        ['/\\', '<*>', '\\/'],
+      ] },
+      antigravity: { label: 'Antigravity', frames: [
+        ['  .  ', ' /^\\ ', '  |  '],
+        [' . . ', ' /^\\ ', '  |  '],
+        ['. . .', ' /^\\ ', '  |  '],
+        [' . . ', ' /^\\ ', '  |  '],
+      ] },
+      openai: { label: 'OpenAI', frames: [
+        [' ___ ', '/ | \\', '\\___/'],
+        [' ___ ', '/ / \\', '\\___/'],
+        [' ___ ', '/ - \\', '\\___/'],
+        [' ___ ', '/ \\ \\', '\\___/'],
+      ] },
+      generic: { label: 'LLM', frames: [
+        ['[o o]', '[ _ ]', '[MCP]'],
+        ['[- -]', '[ _ ]', '[MCP]'],
+      ] },
+      idle: { label: 'LLM', frames: [
+        ['[- -]', '[ _ ]', ' zzz '],
+      ] },
+    };
+
+    function center(s, w) {
+      s = String(s);
+      if (s.length >= w) return s;
+      const left = Math.floor((w - s.length) / 2);
+      return ' '.repeat(left) + s + ' '.repeat(w - s.length - left);
+    }
+
+    let frame = 0;
+    function renderAscii() {
+      frame = (frame + 1) % 100000;
+      const el = document.getElementById('ascii');
+      if (!el) return;
+      const W = 21;
+      const set = LOGOS[vendor] || LOGOS.idle;
+      const lf = set.frames[Math.floor(frame / 4) % set.frames.length];
+      const track = 9;
+      let link;
+      if (llmConnected) {
+        const pos = frame % track;
+        link = Array.from({ length: track }, (_, i) => (i === pos ? '>' : '-')).join('');
+      } else {
+        link = '- - - - -'.padEnd(track, ' ').slice(0, track);
+      }
+      const lines = [
+        ...lf.map((l) => center(l, W)),
+        center(set.label, W),
+        center('MCP ' + link + ' Q1656', W),
+      ];
+      el.textContent = lines.join('\n');
+    }
+
+    document.getElementById('directPort').addEventListener('input', fillUrls);
+    fillUrls();
+    loadSettings().then(loadStatus);
+    renderAscii();
+    setInterval(renderAscii, 140);
+    pollLog();
+  </script>
+</body>
+</html>
