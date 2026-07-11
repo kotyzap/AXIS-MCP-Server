@@ -18,6 +18,50 @@ function parsePtzText(text: string): Record<string, string> | string {
   return Object.keys(parsed).length > 0 ? parsed : text.trim();
 }
 
+/**
+ * Parse ptz.cgi?query=presetposall|presetposcam|presetposcamdata plain-text
+ * responses into structured per-camera preset lists.
+ *
+ * Shape (per official docs):
+ *   Preset Positions for camera 1
+ *   presetposno1=Home
+ *   presetposno2=East PTZ
+ *
+ *   Preset Positions for camera 2
+ *   ...
+ *
+ * presetposcamdata additionally reports position data in degrees per preset;
+ * the exact sub-key names aren't fixed in the docs we could confirm, so we
+ * group generically by preset number and keep whatever dotted suffix (e.g.
+ * ".pan"/".tilt"/".zoom") the camera actually sends, rather than hardcoding
+ * field names that might not match every firmware version.
+ */
+function parsePresetPositions(text: string): Array<{ camera: string; presets: Array<Record<string, string>> }> {
+  const headerRe = /^Preset Positions for camera\s+(\S+)/i;
+  const kvRe = /^([A-Za-z]+?)(\d+)(?:\.(\w+))?\s*=\s*(.*)$/;
+  const cameras: Array<{ camera: string; presets: Map<string, Record<string, string>> }> = [];
+  let current: (typeof cameras)[number] | null = null;
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line) continue;
+    const h = headerRe.exec(line);
+    if (h) {
+      current = { camera: h[1], presets: new Map() };
+      cameras.push(current);
+      continue;
+    }
+    const m = kvRe.exec(line);
+    if (m && current) {
+      const [, , num, field, value] = m;
+      const entry = current.presets.get(num) ?? { number: num };
+      if (field) entry[field.toLowerCase()] = value;
+      else entry.name = value;
+      current.presets.set(num, entry);
+    }
+  }
+  return cameras.map((c) => ({ camera: c.camera, presets: Array.from(c.presets.values()) }));
+}
+
 const MOVE_DIRECTIONS = [
   'home',
   'up',
@@ -203,6 +247,37 @@ export function registerPtzTools(server: McpServer): void {
         const res = await ptzGet({ setserverpresetname: args.name, camera: args.camera });
         if (res.status === 404) return errorResult('PTZ CGI not available on this model.');
         return jsonResult({ status: res.status, response: res.text().trim() });
+      }),
+  );
+
+  server.registerTool(
+    'ptz_preset_list',
+    {
+      title: 'List PTZ presets (all view areas)',
+      description:
+        'List saved PTZ preset positions, grouped by camera/view area, including pan/tilt/zoom in degrees where the model reports it. ' +
+        'Asking for "presets" or "PTZ presets" almost always means this: each view area/channel can have its own independent set of ' +
+        'named presets. Defaults to every view area in one call (ptz.cgi?query=presetposcamdata&camera=all); falls back automatically ' +
+        'to name-only listing (query=presetposcam) if the model does not support position data.',
+      inputSchema: {
+        camera: z
+          .union([z.number(), z.string()])
+          .optional()
+          .describe('View area / video channel number (e.g. 1). Omit to list presets for all view areas at once.'),
+      },
+    },
+    async (args): Promise<ToolResult> =>
+      guard(async () => {
+        const camera = args.camera ?? 'all';
+        let withPositions = true;
+        let res = await ptzGet({ query: 'presetposcamdata', camera });
+        if (res.status === 404 || /unknown value/i.test(res.text())) {
+          withPositions = false;
+          res = await ptzGet({ query: 'presetposcam', camera });
+        }
+        if (res.status === 404) return errorResult('PTZ CGI not available on this model (no PTZ driver / view areas).');
+        if (res.status !== 200) return jsonResult({ status: res.status, response: res.text().trim() });
+        return jsonResult({ status: res.status, withPositions, cameras: parsePresetPositions(res.text()) });
       }),
   );
 

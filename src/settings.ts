@@ -17,6 +17,11 @@ export interface Settings {
   directPort: number;
   /** Optional bearer token required on the direct MCP listener. Empty = no auth. */
   bearerToken: string;
+  /**
+   * MCP tool access level: 'readonly' (inspect only), 'operate' (PTZ, overlays,
+   * streams, I/O — default), 'full' (adds reboot/factory default/set_param/control_app).
+   */
+  accessLevel: 'readonly' | 'operate' | 'full';
   /** UI theme preference: 'light' (default) or 'dark'. */
   theme: 'light' | 'dark';
   /** Force a specific Live Log logo ('' = auto-detect from client name/UA). */
@@ -27,9 +32,10 @@ const DEFAULTS: Settings = {
   vapixUser: '',
   vapixPass: '',
   vapixHost: '127.0.0.1',
-  directPortEnabled: true,
+  directPortEnabled: false, // secure default — opt in via the settings page
   directPort: 8000,
   bearerToken: '',
+  accessLevel: 'operate',
   theme: 'light',
   logoOverride: '',
 };
@@ -56,12 +62,21 @@ function isWritable(dir: string): boolean {
  */
 function dataDir(): string {
   if (resolvedDataDir) return resolvedDataDir;
-  const candidates = [
+  // NOTE: under CamScripter, PERSISTENT_DATA_PATH has been observed to be a
+  // RELATIVE path (e.g. "./localdata/"), unlike the Native SDK's absolute path.
+  // A relative path is only as reliable as the process's ambient CWD at that
+  // moment, which CamScripter doesn't document or guarantee across restarts --
+  // so resolve it against this app's own install dir (a fixed reference point)
+  // instead of trusting process.cwd().
+  const rawCandidates = [
     process.env.PERSISTENT_DATA_PATH,
     path.join(__dirname, '..', 'localdata'),
     '/usr/local/packages/axis_mcp/localdata',
     path.join(os.tmpdir(), 'axis_mcp'),
   ].filter((c): c is string => !!c);
+  const candidates = rawCandidates.map((c) =>
+    path.isAbsolute(c) ? c : path.resolve(__dirname, '..', c)
+  );
 
   for (const c of candidates) {
     if (isWritable(c)) {
@@ -98,11 +113,13 @@ export function loadSettings(): Settings {
 
 export function saveSettings(patch: Partial<Settings>): Settings {
   const current = loadSettings();
+  // Work on a copy — never mutate the caller's object.
+  const p = { ...patch };
   // Never wipe an existing password with an empty string coming from the UI.
-  if (patch.vapixPass === '' || patch.vapixPass === undefined) {
-    delete patch.vapixPass;
+  if (p.vapixPass === '' || p.vapixPass === undefined) {
+    delete p.vapixPass;
   }
-  const next: Settings = { ...current, ...patch };
+  const next: Settings = { ...current, ...p };
   const file = settingsFile();
   try {
     fs.writeFileSync(file, JSON.stringify(next, null, 2), 'utf8');

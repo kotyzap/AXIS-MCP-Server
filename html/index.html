@@ -146,6 +146,14 @@
           <label for="vapixHost">VAPIX host</label>
           <input type="text" id="vapixHost" value="127.0.0.1" />
 
+          <h2 style="margin-top:22px">Access level</h2>
+          <p class="muted">What connected AI agents are allowed to do. Guardrails also rate-limit calls (60/min, 20 writes/min) and cap PTZ presets at 20.</p>
+          <select id="accessLevel" style="width:100%; padding:8px; border:1px solid var(--border); border-radius:8px; background:var(--bg); color:var(--text);">
+            <option value="readonly">Read-only — inspect status, params, snapshots, lists</option>
+            <option value="operate" selected>Operate (default) — + PTZ, focus, overlays, streams, I/O, recordings</option>
+            <option value="full">Full — + reboot, factory default, set_param, control_app</option>
+          </select>
+
           <h2 style="margin-top:22px">Direct MCP port</h2>
           <div class="check">
             <input type="checkbox" id="directPortEnabled" />
@@ -157,14 +165,16 @@
               <input type="number" id="directPort" value="8000" />
             </div>
             <div>
-              <label for="bearerToken">Bearer token (optional)</label>
+              <label for="bearerToken">Bearer token</label>
               <input type="password" id="bearerToken" placeholder="(unchanged)" />
             </div>
           </div>
+          <p class="muted">Enabling the direct port without a token auto-generates one — it is shown once after saving.</p>
+          <div id="genToken" class="url" style="display:none"><code id="genTokenVal"></code></div>
 
           <button onclick="save()">Save settings</button>
           <div id="toast" class="toast"></div>
-          <p class="muted" style="margin-top:8px">Saving restarts the app (runMode: respawn); the MCP server reconnects automatically.</p>
+          <p class="muted" style="margin-top:8px">Settings apply immediately — the direct MCP listener is started, stopped, or moved live. No app restart needed.</p>
         </div>
       </div>
     </div>
@@ -194,17 +204,36 @@
         <pre id="logView"></pre>
       </div>
     </div>
+
+    <footer style="margin-top:18px; text-align:center; font-size:.82rem; color:var(--muted);">
+      <a href="https://github.com/kotyzap/AXIS-MCP-Server" target="_blank" rel="noopener">GitHub</a>
+      &nbsp;·&nbsp;
+      <a href="https://kotyzap.github.io/AXIS-MCP-Server/" target="_blank" rel="noopener">Project page</a>
+      &nbsp;·&nbsp;
+      <a href="https://github.com/kotyzap/AXIS-MCP-Server/releases" target="_blank" rel="noopener">Releases</a>
+    </footer>
   </div>
 
   <script>
     // API base detection (skill: web-ui-and-vapix.md portable snippet).
+    // NOTE: under CamScripter the settings page and the dynamic API do NOT share
+    // one base path (unlike the ACAP reverse proxy, where they do):
+    //   ACAP (FW11/12): settingPage AND reverseProxy CGIs both under /local/axis_mcp/*
+    //   CamScripter (FW10): static UI under /local/camscripter/package/axis_mcp/*
+    //                       (served directly from html/, not proxied to this app),
+    //                       but the dynamic API (status.cgi/settings.cgi/log.cgi/mcp)
+    //                       is proxied separately under /local/camscripter/proxy/axis_mcp/*
+    // See: https://support.camstreamer.com/hc/en-us/articles/360010574858
     const PKG = 'axis_mcp';
     const isDirectPort = location.port === '32554' || location.port === '8000';
     let API_PREFIX;
     if (isDirectPort) {
       API_PREFIX = '';
+    } else if (location.pathname.indexOf('/local/camscripter/package/') !== -1) {
+      API_PREFIX = '/local/camscripter/proxy/' + PKG;
     } else {
-      API_PREFIX = '/local/' + PKG;
+      const dir = location.pathname.replace(/\/[^/]*$/, ''); // strip trailing filename
+      API_PREFIX = dir || ('/local/' + PKG);
     }
 
     function toggleTheme() {
@@ -222,7 +251,7 @@
     function fillUrls() {
       const host = location.hostname || '<camera-ip>';
       const dp = document.getElementById('directPort').value || '8000';
-      document.getElementById('urlProxy').textContent = location.origin + '/local/' + PKG + '/mcp';
+      document.getElementById('urlProxy').textContent = location.origin + API_PREFIX + '/mcp';
       document.getElementById('urlDirect').textContent = 'http://' + host + ':' + dp + '/mcp';
       document.getElementById('claudeCmd').textContent =
         'claude mcp add --transport http axis-q1656 http://' + host + ':' + dp + '/mcp';
@@ -273,6 +302,7 @@
         document.getElementById('vapixHost').value = s.vapixHost || '127.0.0.1';
         document.getElementById('directPortEnabled').checked = !!s.directPortEnabled;
         document.getElementById('directPort').value = s.directPort || 8000;
+        document.getElementById('accessLevel').value = s.accessLevel || 'operate';
         document.getElementById('vapixPass').placeholder = s.hasPassword ? '(unchanged)' : '';
         document.getElementById('bearerToken').placeholder = s.hasBearerToken ? '(unchanged)' : '';
         applyTheme(s.theme === 'dark' ? 'dark' : 'light');
@@ -284,17 +314,54 @@
       } catch (e) { /* ignore */ }
     }
 
-    async function postSettings(patch) {
-      const r = await fetch(API_PREFIX + '/settings.cgi', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(patch),
-      });
-      let detail = '';
-      try {
-        const j = await r.json();
-        if (j && j.error) detail = j.error;
-      } catch (e) { detail = 'HTTP ' + r.status; }
-      return { ok: r.ok, status: r.status, detail };
+    // Under CamScripter, the static UI is served directly from the package
+    // (see the /local/camscripter/package/... scheme) and loads instantly --
+    // but the Node backend behind /local/camscripter/proxy/... can take several
+    // seconds to bind after every package (re)start (CamScripter itself polls
+    // the port and logs "Connection refused" during that window). A save fired
+    // right after opening/reloading the page can race that window and get a
+    // network error or a 5xx that has nothing to do with the settings payload
+    // itself. Retry a few times with a short delay before surfacing a real
+    // error, instead of failing hard on the first attempt.
+    const SAVE_RETRY_ATTEMPTS = 4;
+    const SAVE_RETRY_DELAY_MS = 1500;
+
+    function delay(ms) {
+      return new Promise((resolve) => setTimeout(resolve, ms));
+    }
+
+    async function postSettings(patch, onRetry) {
+      let lastErr = '';
+      for (let attempt = 1; attempt <= SAVE_RETRY_ATTEMPTS; attempt++) {
+        let r;
+        try {
+          r = await fetch(API_PREFIX + '/settings.cgi', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(patch),
+          });
+        } catch (e) {
+          lastErr = e.message;
+          if (attempt < SAVE_RETRY_ATTEMPTS) {
+            if (onRetry) onRetry(attempt);
+            await delay(SAVE_RETRY_DELAY_MS);
+            continue;
+          }
+          return { ok: false, status: 0, detail: lastErr };
+        }
+        if (!r.ok && attempt < SAVE_RETRY_ATTEMPTS) {
+          if (onRetry) onRetry(attempt);
+          await delay(SAVE_RETRY_DELAY_MS);
+          continue;
+        }
+        let detail = '';
+        let json = null;
+        try {
+          json = await r.json();
+          if (json && json.error) detail = json.error;
+        } catch (e) { detail = 'HTTP ' + r.status; }
+        return { ok: r.ok, status: r.status, detail, json };
+      }
+      return { ok: false, status: 0, detail: lastErr };
     }
 
     async function save() {
@@ -303,6 +370,7 @@
         vapixHost: document.getElementById('vapixHost').value,
         directPortEnabled: document.getElementById('directPortEnabled').checked,
         directPort: parseInt(document.getElementById('directPort').value, 10) || 8000,
+        accessLevel: document.getElementById('accessLevel').value,
       };
       const pass = document.getElementById('vapixPass').value;
       if (pass) patch.vapixPass = pass;
@@ -310,8 +378,12 @@
       if (bt) patch.bearerToken = bt;
 
       const toast = document.getElementById('toast');
+      toast.className = 'toast';
+      toast.textContent = 'Saving…';
       try {
-        const res = await postSettings(patch);
+        const res = await postSettings(patch, (attempt) => {
+          toast.textContent = 'App may still be starting up — retrying (' + attempt + '/' + SAVE_RETRY_ATTEMPTS + ')…';
+        });
         toast.className = 'toast ' + (res.ok ? 'ok' : 'err');
         toast.textContent = res.ok
           ? 'Saved. App is restarting…'
@@ -319,6 +391,12 @@
         if (res.ok) {
           document.getElementById('vapixPass').value = '';
           document.getElementById('bearerToken').value = '';
+          if (res.json && res.json.generatedToken) {
+            const box = document.getElementById('genToken');
+            document.getElementById('genTokenVal').textContent =
+              'Bearer token (copy now, shown once): ' + res.json.generatedToken;
+            box.style.display = 'block';
+          }
           fillUrls();
           setTimeout(loadStatus, 4000);
         }

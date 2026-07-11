@@ -1,6 +1,6 @@
 {
   "name": "axis-mcp",
-  "version": "1.2.0",
+  "version": "1.4.0",
   "description": "On-camera MCP server for Axis cameras (ARTPEC-8, AXIS OS 12), VAPIX-backed tools over Streamable HTTP.",
   "license": "MIT",
   "main": "dist/bootstrap.js",

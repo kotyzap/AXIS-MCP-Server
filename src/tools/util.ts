@@ -57,3 +57,72 @@ export function parseParamResponse(text: string): Record<string, string> {
   }
   return out;
 }
+
+/**
+ * Minimal CSV parser for Axis's various export-csv-* CGIs (no quoted/escaped
+ * commas seen in practice across Queue Monitor / People Counter / etc.).
+ */
+export function parseCsv(text: string): { headers: string[]; rows: Array<Record<string, string>> } {
+  const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
+  if (lines.length === 0) return { headers: [], rows: [] };
+  const headers = lines[0].split(',').map((h) => h.trim());
+  const rows = lines.slice(1).map((line) => {
+    const cells = line.split(',');
+    const row: Record<string, string> = {};
+    headers.forEach((h, i) => (row[h] = (cells[i] ?? '').trim()));
+    return row;
+  });
+  return { headers, rows };
+}
+
+/**
+ * Parse a flat (single-level) XML document into a tag -> text object, e.g.
+ * the <cloud_config>/<hb_config> responses from the LPV app. Handles both
+ * `<tag>value</tag>` and self-closing `<tag/>` leaves; skips the wrapping
+ * root element since its own content starts with a nested tag rather than
+ * plain text.
+ */
+export function parseFlatXml(xml: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  const re = /<([A-Za-z0-9_]+)(?:\s[^>]*)?(?:\/>|>([^<]*)<\/\1>)/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(xml)) !== null) {
+    out[m[1]] = m[2] !== undefined ? m[2] : '';
+  }
+  return out;
+}
+
+/**
+ * Extract the raw inner XML of every occurrence of <tag>...</tag> (non-greedy,
+ * one level — good enough for the repeated-block shapes used by Zipstream's
+ * <Status>/<Profile> lists and similar). Each returned string can be fed to
+ * parseFlatXml() to get that block's own leaf fields.
+ */
+export function extractXmlBlocks(xml: string, tag: string): string[] {
+  const re = new RegExp(`<${tag}(?:\\s[^>]*)?>([\\s\\S]*?)</${tag}>`, 'g');
+  const out: string[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(xml)) !== null) out.push(m[1]);
+  return out;
+}
+
+/** Extract the text content of every occurrence of a repeated leaf tag, e.g. every <Strength>10</Strength>. */
+export function extractXmlTagAll(xml: string, tag: string): string[] {
+  const re = new RegExp(`<${tag}(?:\\s[^>]*)?>([^<]*)</${tag}>`, 'g');
+  const out: string[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(xml)) !== null) out.push(m[1]);
+  return out;
+}
+
+/**
+ * Detect a VAPIX XML CGI's <GeneralError> block (used by Zipstream, Orientation,
+ * Recorded tour and other legacy XML CGIs) and return its code/description, or
+ * null if the response was a success.
+ */
+export function xmlGeneralError(xml: string): { code: string; description: string } | null {
+  const blocks = extractXmlBlocks(xml, 'GeneralError');
+  if (blocks.length === 0) return null;
+  const parsed = parseFlatXml(blocks[0]);
+  return { code: parsed.ErrorCode ?? '', description: parsed.ErrorDescription ?? parsed.Description ?? '' };
+}

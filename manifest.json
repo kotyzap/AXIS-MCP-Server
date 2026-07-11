@@ -5,7 +5,7 @@
       "appName": "axis_mcp",
       "friendlyName": "Axis MCP Server",
       "vendor": "Pavel Kotyza",
-      "version": "1.2.0",
+      "version": "1.4.0",
       "architecture": "aarch64",
       "runMode": "respawn"
     },

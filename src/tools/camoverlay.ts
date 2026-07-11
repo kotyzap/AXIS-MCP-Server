@@ -67,7 +67,11 @@ export function registerCamOverlayTools(server: McpServer): void {
     'camoverlay_set_service_enabled',
     {
       title: 'Enable / disable a CamOverlay service',
-      description: 'Enable or disable a CamOverlay service by service_id.',
+      description:
+        'Enable or disable a CamOverlay service (widget) by service_id, via /local/camoverlay/api/enabled.cgi?id_<service_id>=<0|1>. ' +
+        'NOTE: this is a distinct, simpler API from services.cgi?action=set -- that endpoint expects a full JSON ' +
+        'service config in the body and will 400 with "service configuration have to by valid JSON" if you just want ' +
+        'a toggle. enabled.cgi is the correct/documented way to turn a widget on or off without touching its stored config.',
       inputSchema: {
         service_id: z.union([z.number(), z.string()]).describe('The CamOverlay service ID.'),
         enabled: z.boolean().describe('true = enable, false = disable.'),
@@ -75,10 +79,11 @@ export function registerCamOverlayTools(server: McpServer): void {
     },
     async (args): Promise<ToolResult> =>
       guard(async () => {
+        const idParam = `id_${args.service_id}`;
         const res = await vapix({
           method: 'GET',
-          path: '/local/camoverlay/api/services.cgi',
-          query: { action: 'set', service_id: String(args.service_id), enabled: args.enabled ? '1' : '0' },
+          path: '/local/camoverlay/api/enabled.cgi',
+          query: { [idParam]: args.enabled ? '1' : '0' },
         });
         return jsonResult({ status: res.status, response: safeJson(res.text()) });
       }),

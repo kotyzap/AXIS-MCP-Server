@@ -13,11 +13,13 @@
 import express, { Request, Response } from 'express';
 import * as path from 'path';
 import * as fs from 'fs';
+import * as crypto from 'crypto';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { createMcpServer } from './mcpServer';
 import { vapix } from './vapix';
 import { loadSettings, saveSettings, redactedSettings, isConfigured, Settings } from './settings';
 import { pushLog, getLogs, describeMcp, markMcpActivity, setClient, setClientTag } from './logbuf';
+import { APP_VERSION } from './version';
 
 const PRIMARY_PORT = parseInt(process.env.HTTP_PORT ?? '32554', 10);
 const HTML_DIR = path.join(__dirname, '..', 'html');
@@ -67,7 +69,7 @@ async function statusCgi(_req: Request, res: Response): Promise<void> {
   const s = loadSettings();
   const result: Record<string, unknown> = {
     app: 'axis-mcp',
-    version: '1.2.0',
+    version: APP_VERSION,
     configured,
     endpoints: {
       reverseProxy: '/local/axis_mcp/mcp',
@@ -106,13 +108,41 @@ function settingsCgi(req: Request, res: Response): void {
       if (typeof body.vapixPass === 'string') patch.vapixPass = body.vapixPass;
       if (typeof body.vapixHost === 'string') patch.vapixHost = body.vapixHost;
       if (typeof body.directPortEnabled === 'boolean') patch.directPortEnabled = body.directPortEnabled;
-      if (typeof body.directPort === 'number') patch.directPort = body.directPort;
+      if (typeof body.directPort === 'number') {
+        if (!Number.isInteger(body.directPort) || body.directPort < 1 || body.directPort > 65535) {
+          res.status(400).json({ ok: false, error: 'directPort must be an integer 1-65535.' });
+          return;
+        }
+        if (body.directPort === PRIMARY_PORT) {
+          res.status(400).json({ ok: false, error: `directPort ${body.directPort} collides with the primary server port.` });
+          return;
+        }
+        patch.directPort = body.directPort;
+      }
       if (typeof body.bearerToken === 'string') patch.bearerToken = body.bearerToken;
       if (body.theme === 'light' || body.theme === 'dark') patch.theme = body.theme;
       if (typeof body.logoOverride === 'string') patch.logoOverride = body.logoOverride as Settings['logoOverride'];
+      if (body.accessLevel === 'readonly' || body.accessLevel === 'operate' || body.accessLevel === 'full') {
+        patch.accessLevel = body.accessLevel;
+      }
+      // Security: never allow the direct port to be enabled without a bearer
+      // token. If none is set (and none supplied), generate one and return it
+      // once so the operator can copy it.
+      let generatedToken: string | undefined;
+      const current = loadSettings();
+      const enablingDirect = patch.directPortEnabled ?? current.directPortEnabled;
+      const tokenAfter = patch.bearerToken !== undefined ? patch.bearerToken : current.bearerToken;
+      if (enablingDirect && !tokenAfter) {
+        generatedToken = crypto.randomBytes(24).toString('base64url');
+        patch.bearerToken = generatedToken;
+        pushLog('warn', 'direct port enabled without a bearer token — generated one automatically');
+      }
       saveSettings(patch);
-      res.json({ ok: true, settings: redactedSettings() });
-      // Note: runMode=respawn — AXIS OS restarts the app after a settings save.
+      // Apply the direct-listener config immediately — saving settings does NOT
+      // restart the app (runMode=respawn only governs crash recovery), so the
+      // listener must be started/stopped/rebound live.
+      syncDirectServer();
+      res.json({ ok: true, settings: redactedSettings(), ...(generatedToken ? { generatedToken } : {}) });
     } catch (e) {
       const msg = (e as Error).message;
       console.error('[axis-mcp] settings save failed:', msg);
@@ -163,29 +193,109 @@ function registerRoutes(app: express.Express, includeCgi: boolean): void {
   }
 }
 
+// Catches anything unhandled anywhere in the chain -- including JSON body-parse
+// failures, which by default produce Express's generic (non-JSON) error page.
+// That's exactly what was happening under CamScripter's proxy: the client's
+// r.json() on the error response threw, falling back to a bare "HTTP 500"
+// with no detail, and the request never showed up in the Live Log because the
+// logging middleware used to run AFTER express.json() -- an error there skipped
+// straight past it. Now every request is logged first (see below), and any
+// error, wherever it originates, is logged and returned as real JSON.
+function errorHandler(
+  err: unknown,
+  req: Request,
+  res: Response,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  _next: express.NextFunction
+): void {
+  const msg = err instanceof Error ? err.message : String(err);
+  pushLog('error', `unhandled error on ${req.method} ${req.path}: ${msg}`);
+  console.error('[axis-mcp] unhandled error:', err);
+  if (!res.headersSent) {
+    res.status(500).json({ ok: false, error: msg });
+  }
+}
+
 function buildPrimaryApp(): express.Express {
   const app = express();
-  app.use(express.json({ limit: '4mb' }));
   // Log every incoming request into the ring buffer (shown in the UI Live Log
-  // and mirrored to the AXIS app log). Skip the log poller itself to avoid noise.
+  // and mirrored to the AXIS app log) BEFORE body parsing, so it's always
+  // visible even if JSON parsing itself throws.
   app.use((req, _res, next) => {
     if (!RE_LOG.test(req.path)) pushLog('info', `${req.method} ${req.path}`);
     next();
   });
+  app.use(express.json({ limit: '4mb' }));
   registerRoutes(app, true);
   // Convenience for local dev / direct access (AXIS OS serves the real one).
   if (fs.existsSync(HTML_DIR)) {
     app.use('/', express.static(HTML_DIR));
   }
+  app.use(errorHandler);
   return app;
 }
 
 function buildDirectApp(): express.Express {
   const app = express();
-  app.use(express.json({ limit: '4mb' }));
   app.use(bearerGate);
+  app.use(express.json({ limit: '4mb' }));
   registerRoutes(app, false);
+  app.use(errorHandler);
   return app;
+}
+
+// ---- Direct listener lifecycle ----------------------------------------------
+// The direct MCP listener is managed here so it can be started, stopped, or
+// moved to another port live when the operator saves settings — no app restart
+// needed. Bearer-token and access-level changes need no rebind at all: the
+// gate reads settings on every request.
+
+let directServer: ReturnType<express.Express['listen']> | undefined;
+let directPortActive = 0;
+
+function syncDirectServer(): void {
+  const s = loadSettings();
+  const wantPort =
+    s.directPortEnabled && s.directPort && s.directPort !== PRIMARY_PORT ? s.directPort : 0;
+
+  if (wantPort === directPortActive) {
+    if (wantPort && !s.bearerToken) {
+      pushLog('warn', 'SECURITY: direct MCP port is enabled WITHOUT a bearer token — anyone on the LAN can call tools. Set a token on the settings page.');
+    }
+    return; // nothing to rebind
+  }
+
+  if (directServer) {
+    const old = directServer;
+    directServer = undefined;
+    old.close();
+    // Node >= 18.2: drop keep-alive connections so the port frees immediately.
+    (old as unknown as { closeAllConnections?: () => void }).closeAllConnections?.();
+    pushLog('info', `direct MCP server on ${directPortActive} stopped`);
+    directPortActive = 0;
+  }
+
+  if (!wantPort) return;
+
+  if (!s.bearerToken) {
+    // Legacy installs may have the port enabled with no token. Keep working
+    // (don't silently lock existing clients out) but warn loudly.
+    pushLog('warn', 'SECURITY: direct MCP port is enabled WITHOUT a bearer token — anyone on the LAN can call tools. Set a token on the settings page.');
+  }
+  const direct = buildDirectApp();
+  const srv = direct.listen(wantPort, '0.0.0.0', () => {
+    const cur = loadSettings();
+    pushLog('info', `direct MCP server listening on ${wantPort} (bearer=${cur.bearerToken ? 'on' : 'off'}, access=${cur.accessLevel})`);
+  });
+  srv.on('error', (e) => {
+    pushLog('error', `direct server failed on ${wantPort}: ${(e as Error).message}`);
+    if (directServer === srv) {
+      directServer = undefined;
+      directPortActive = 0;
+    }
+  });
+  directServer = srv;
+  directPortActive = wantPort;
 }
 
 function main(): void {
@@ -195,19 +305,8 @@ function main(): void {
     pushLog('info', 'MCP endpoint (via reverse proxy): /local/axis_mcp/mcp');
   });
 
-  const s = loadSettings();
-  let directServer: ReturnType<express.Express['listen']> | undefined;
-  if (s.directPortEnabled && s.directPort && s.directPort !== PRIMARY_PORT) {
-    const direct = buildDirectApp();
-    directServer = direct.listen(s.directPort, '0.0.0.0', () => {
-      pushLog('info', `direct MCP server listening on ${s.directPort} (bearer=${s.bearerToken ? 'on' : 'off'})`);
-    });
-    directServer.on('error', (e) => {
-      pushLog('error', `direct server failed on ${s.directPort}: ${(e as Error).message}`);
-    });
-  }
+  syncDirectServer();
 
-  // Clean SIGINT exit — the skill lifecycle relies on respawn after settings save.
   const shutdown = () => {
     pushLog('info', 'shutting down...');
     primaryServer.close();
